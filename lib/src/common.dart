@@ -1,13 +1,10 @@
 import 'dart:math';
-import 'dart:ui';
 
 import 'package:google_maps_flutter_platform_interface/google_maps_flutter_platform_interface.dart';
 
-import 'cluster.dart';
-
-const int _mio = 1000000;
 const int _thd = 1000;
 const double _PI = 3.141592653589793238;
+const num _RADIUS = 6371e3;
 
 class _Tuple {
   final LatLng pos1;
@@ -59,6 +56,7 @@ class DistUtils {
         (meterPerPixel / _thd);
     // print("dist is $x");
     distCache[_Tuple(point1, point2)] = dist;
+    // print('DISTANCE IS: $dist');
     return dist;
   }
 
@@ -79,6 +77,10 @@ class DistUtils {
 
   double _degreeToRadian(double degree) {
     return degree * _PI / 180;
+  }
+
+  double _radianToDegree(double rad) {
+    return rad * (180.0 / _PI);
   }
 
   double _getScalingFactor(int zoomLevel) {
@@ -128,5 +130,59 @@ class DistUtils {
       default:
         return 0.149;
     }
+  }
+
+  ///
+  /// Get distance from point by bearing and km
+  LatLng getPointAtDistanceFrom(LatLng startPoint, double initialBearingRadians,
+      double distanceKilometres) {
+    const double radiusEarthKilometres = 6371.01;
+    var distRatio = distanceKilometres / radiusEarthKilometres;
+    var distRatioSine = sin(distRatio);
+    var distRatioCosine = cos(distRatio);
+
+    var startLatRad = _degreeToRadian(startPoint.latitude);
+    var startLonRad = _degreeToRadian(startPoint.longitude);
+
+    var startLatCos = cos(startLatRad);
+    var startLatSin = sin(startLatRad);
+
+    var endLatRads = asin((startLatSin * distRatioCosine) +
+        (startLatCos * distRatioSine * cos(initialBearingRadians)));
+
+    var endLonRads = startLonRad +
+        atan2(sin(initialBearingRadians) * distRatioSine * startLatCos,
+            distRatioCosine - startLatSin * sin(endLatRads));
+
+    return LatLng(_radianToDegree(endLatRads), _radianToDegree(endLonRads));
+  }
+
+  /// calculate a destination point given the distance and bearing
+  LatLng destinationPointByDistanceAndBearing(
+      LatLng l, num distance, num bearing,
+      [num? radius]) {
+    radius ??= _RADIUS;
+
+    final num angularDistanceRadius = distance / radius;
+    final num bearingRadians = _degreeToRadian(bearing as double);
+
+    final num latRadians = _degreeToRadian(l.latitude);
+    final num lngRadians = _degreeToRadian(l.longitude);
+
+    final num sinLatRadians = sin(latRadians);
+    final num cosLatRadians = cos(latRadians);
+    final num sinAngularDistanceRadius = sin(angularDistanceRadius);
+    final num cosAngularDistanceRadius = cos(angularDistanceRadius);
+    final num sinBearingRadians = sin(bearingRadians);
+    final num cosBearingRadians = cos(bearingRadians);
+
+    final sinLatRadians2 = sinLatRadians * cosAngularDistanceRadius +
+        cosLatRadians * sinAngularDistanceRadius * cosBearingRadians;
+    final num latRadians2 = asin(sinLatRadians2);
+    final y = sinBearingRadians * sinAngularDistanceRadius * cosLatRadians;
+    final x = cosAngularDistanceRadius - sinLatRadians * sinLatRadians2;
+    final num lngRadians2 = lngRadians + atan2(y, x);
+    return LatLng(_radianToDegree(latRadians2 as double),
+        (_radianToDegree(lngRadians2 as double) + 540) % 360 - 180);
   }
 }
