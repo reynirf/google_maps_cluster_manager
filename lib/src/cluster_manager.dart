@@ -1,5 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -7,9 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_cluster_manager/google_maps_cluster_manager.dart';
 import 'package:google_maps_cluster_manager/src/common.dart';
 import 'package:google_maps_cluster_manager/src/max_dist_clustering.dart';
-import 'package:google_maps_flutter_platform_interface/google_maps_flutter_platform_interface.dart';
+import 'package:google_maps_flutter_platform_interface/google_maps_flutter_platform_interface.dart'
+    as maps_interface;
 
 enum ClusterAlgorithm { GEOHASH, MAX_DIST }
+
 enum ClusterOverlapping { NONE, OVERLAP, DISTRIBUTE }
 
 class MaxDistParams {
@@ -34,7 +35,7 @@ class ClusterManager<T extends ClusterItem> {
   ClusterManager(
     this._items,
     this.updateMarkers, {
-    Future<Marker> Function(Cluster<T>)? markerBuilder,
+    Future<maps_interface.Marker> Function(Cluster<T>)? markerBuilder,
     this.levels = const [1, 4.25, 6.75, 8.25, 11.5, 14.5, 16.0, 16.5, 20.0],
     this.extraPercent = 0.5,
     this.maxItemsForMaxDistAlgo = 200,
@@ -47,13 +48,13 @@ class ClusterManager<T extends ClusterItem> {
         assert(levels.length <= precision);
 
   /// Method to build markers
-  final Future<Marker> Function(Cluster<T>) markerBuilder;
+  final Future<maps_interface.Marker> Function(Cluster<T>) markerBuilder;
 
   /// Num of Items to switch from MAX_DIST algo to GEOHASH
   final int maxItemsForMaxDistAlgo;
 
   /// Function to update Markers on Google Map
-  final void Function(Set<Marker>) updateMarkers;
+  final void Function(Set<maps_interface.Marker>) updateMarkers;
 
   /// Zoom levels configuration
   final List<double> levels;
@@ -94,7 +95,8 @@ class ClusterManager<T extends ClusterItem> {
   /// Set Google Map Id for the cluster manager
   void setMapId(int mapId, {bool withUpdate = true}) async {
     _mapId = mapId;
-    _zoom = await GoogleMapsFlutterPlatform.instance.getZoomLevel(mapId: mapId);
+    _zoom = await maps_interface.GoogleMapsFlutterPlatform.instance
+        .getZoomLevel(mapId: mapId);
     if (withUpdate) updateMap();
   }
 
@@ -106,7 +108,7 @@ class ClusterManager<T extends ClusterItem> {
   void _updateClusters() async {
     List<Cluster<T>> mapMarkers = await getMarkers();
 
-    final Set<Marker> markers =
+    final Set<maps_interface.Marker> markers =
         Set.from(await Future.wait(mapMarkers.map((m) => markerBuilder(m))));
 
     updateMarkers(markers);
@@ -129,7 +131,8 @@ class ClusterManager<T extends ClusterItem> {
   }
 
   /// Method called on camera move
-  void onCameraMove(CameraPosition position, {bool forceUpdate = false}) {
+  void onCameraMove(maps_interface.CameraPosition position,
+      {bool forceUpdate = false}) {
     _zoom = position.zoom;
     if (forceUpdate) {
       updateMap();
@@ -137,12 +140,13 @@ class ClusterManager<T extends ClusterItem> {
   }
 
   /// Return the geo-calc inflated bounds
-  Future<LatLngBounds?> getInflatedBounds() async {
+  Future<maps_interface.LatLngBounds?> getInflatedBounds() async {
     if (_mapId == null) return null;
-    final LatLngBounds mapBounds = await GoogleMapsFlutterPlatform.instance
+    final maps_interface.LatLngBounds mapBounds = await maps_interface
+        .GoogleMapsFlutterPlatform.instance
         .getVisibleRegion(mapId: _mapId!);
 
-    late LatLngBounds inflatedBounds;
+    late maps_interface.LatLngBounds inflatedBounds;
     if (clusterAlgorithm == ClusterAlgorithm.GEOHASH) {
       inflatedBounds = _inflateBounds(mapBounds);
     } else {
@@ -160,13 +164,13 @@ class ClusterManager<T extends ClusterItem> {
     // print('BUILD OVERLAPPED WITH $clusterOverlapping');
     /// Overlapping: if the points are in the same place, create fixed cluster
     if (clusterOverlapping == ClusterOverlapping.OVERLAP) {
-      Map<LatLng, List<T>> _map = {};
+      Map<maps_interface.LatLng, List<T>> _map = {};
       items.forEach((e) {
         final key = _map.keys.firstWhere(
             (k) =>
                 distUtils.getLatLonDist(k, e.location, _getZoomLevel(_zoom)) <=
                 (clusterOverlappingParams!.overlappingDistanceLimitInMeters),
-            orElse: () => LatLng(0, 0));
+            orElse: () => maps_interface.LatLng(0, 0));
         if (key.longitude != 0) {
           _map[key]?.add(e);
         } else {
@@ -240,7 +244,8 @@ class ClusterManager<T extends ClusterItem> {
     }
   }
 
-  LatLngBounds _inflateBounds(LatLngBounds bounds) {
+  maps_interface.LatLngBounds _inflateBounds(
+      maps_interface.LatLngBounds bounds) {
     // Bounds that cross the date line expand compared to their difference with the date line
     double lng = 0;
     if (bounds.northeast.longitude < bounds.southwest.longitude) {
@@ -259,10 +264,10 @@ class ClusterManager<T extends ClusterItem> {
     double eLng = (bounds.northeast.longitude + lng).clamp(-_maxLng, _maxLng);
     double wLng = (bounds.southwest.longitude - lng).clamp(-_maxLng, _maxLng);
 
-    return LatLngBounds(
-      southwest: LatLng(bounds.southwest.latitude - lat, wLng),
-      northeast:
-          LatLng(bounds.northeast.latitude + lat, lng != 0 ? eLng : _maxLng),
+    return maps_interface.LatLngBounds(
+      southwest: maps_interface.LatLng(bounds.southwest.latitude - lat, wLng),
+      northeast: maps_interface.LatLng(
+          bounds.northeast.latitude + lat, lng != 0 ? eLng : _maxLng),
     );
   }
 
@@ -313,20 +318,21 @@ class ClusterManager<T extends ClusterItem> {
     return _computeClusters(newInputList, markerItems, level: level);
   }
 
-  static Future<Marker> Function(Cluster) get _basicMarkerBuilder =>
-      (cluster) async {
-        return Marker(
-          markerId: MarkerId(cluster.getId()),
-          position: cluster.location,
-          onTap: () {
-            print(cluster);
-          },
-          icon: await _getBasicClusterBitmap(cluster.isMultiple ? 125 : 75,
-              text: cluster.isMultiple ? cluster.count.toString() : null),
-        );
-      };
+  static Future<maps_interface.Marker> Function(Cluster)
+      get _basicMarkerBuilder => (cluster) async {
+            return maps_interface.Marker(
+              markerId: maps_interface.MarkerId(cluster.getId()),
+              position: cluster.location,
+              onTap: () {
+                print(cluster);
+              },
+              icon: await _getBasicClusterBitmap(cluster.isMultiple ? 125 : 75,
+                  text: cluster.isMultiple ? cluster.count.toString() : null),
+            );
+          };
 
-  static Future<BitmapDescriptor> _getBasicClusterBitmap(int size,
+  static Future<maps_interface.BitmapDescriptor> _getBasicClusterBitmap(
+      int size,
       {String? text}) async {
     final PictureRecorder pictureRecorder = PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
@@ -353,6 +359,6 @@ class ClusterManager<T extends ClusterItem> {
     final img = await pictureRecorder.endRecording().toImage(size, size);
     final data = await img.toByteData(format: ImageByteFormat.png) as ByteData;
 
-    return BitmapDescriptor.fromBytes(data.buffer.asUint8List());
+    return maps_interface.BitmapDescriptor.fromBytes(data.buffer.asUint8List());
   }
 }
